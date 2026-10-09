@@ -1,0 +1,57 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/v1/orders",
+    "file": "routes/orders.py",
+    "line": 6,
+    "router_prefix_chain": [
+      "/api/v1",
+      "/orders"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/orders",
+    "file": "routes/orders.py",
+    "line": 10,
+    "router_prefix_chain": [
+      "/api/v1",
+      "/orders"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/orders/{order_id:int}",
+    "file": "routes/orders.py",
+    "line": 14,
+    "router_prefix_chain": [
+      "/api/v1",
+      "/orders"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/health",
+    "file": "main.py",
+    "line": 10,
+    "router_prefix_chain": []
+  },
+  {
+    "method": "GET",
+    "path": "/legacy/ping",
+    "file": "routes/legacy.py",
+    "line": 6,
+    "router_prefix_chain": [
+      "/legacy"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/legacy/ping",
+    "file": "routes/legacy.py",
+    "line": 6,
+    "router_prefix_chain": [
+      "/legacy"
+    ]
+  }
+]
