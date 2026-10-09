@@ -76,18 +76,45 @@ def _module_name(root: Path, path: Path) -> str:
     return ".".join(parts)
 
 
-def _collect(root: Path) -> dict[str, _Module]:
+def _collect(root: Path) -> tuple[dict[str, _Module], list[Skipped]]:
     modules = {}
+    skipped = []
+
     for file in sorted(root.rglob("*.py")):
-        if any(p.startswith(".") or p in {"venv", ".venv", "node_modules", "__pycache__"} for p in file.relative_to(root).parts):
+        if any(
+            part.startswith(".") or part in {
+                "venv", ".venv", "node_modules", "__pycache__"
+            }
+            for part in file.relative_to(root).parts
+        ):
             continue
+
+        relative = file.relative_to(root).as_posix()
+
         try:
-            tree = ast.parse(file.read_text(encoding="utf-8"), filename=str(file))
-        except (UnicodeError, SyntaxError, OSError):
+            content = file.read_text(encoding="utf-8")
+            tree = ast.parse(content, filename=str(file))
+        except SyntaxError as exc:
+            skipped.append(Skipped(
+                "syntax_error",
+                relative,
+                exc.lineno or 0,
+                (exc.text or "").strip(),
+            ))
             continue
+        except (UnicodeError, OSError) as exc:
+            skipped.append(Skipped(
+                "file_read_error",
+                relative,
+                0,
+                type(exc).__name__,
+            ))
+            continue
+
         name = _module_name(root, file)
         modules[name] = _Module(name, file, tree)
-    return modules
+
+    return modules, skipped
 
 
 def _resolve(mod: _Module, value: str) -> str:
@@ -170,7 +197,7 @@ def extract_routes(path: Path) -> RoutesResult:
     root = Path(path).resolve()
     if not root.is_dir():
         raise ValueError(f"Not a directory: {root}")
-    modules = _collect(root)
+    modules, collection_skipped = _collect(root)
     for mod in modules.values():
         _parse(mod)
 
@@ -184,7 +211,7 @@ def extract_routes(path: Path) -> RoutesResult:
             endpoints.setdefault(_resolve(mod, owner), []).append((mod, route, methods, line))
 
     result: set[Route] = set()
-    skipped = [Skipped(item.reason, Path(item.file).relative_to(root).as_posix(), item.line, item.snippet)
+    skipped = collection_skipped + [Skipped(item.reason, Path(item.file).relative_to(root).as_posix(), item.line, item.snippet)
                for mod in modules.values() for item in mod.skipped]
 
     def visit(obj: str, chain: tuple[str, ...], seen: frozenset[str]) -> None:

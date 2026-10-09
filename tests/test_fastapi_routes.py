@@ -72,3 +72,51 @@ def test_cli_json_output_matches_expected():
     actual = json.loads(completed.stdout)
     expected = json.loads((FIXTURE.parent / "expected.json").read_text())
     assert actual == {"routes": expected, "skipped": []}
+
+def test_syntax_error_is_reported(tmp_path):
+    (tmp_path / "broken.py").write_text("def broken(\n")
+
+    result = extract_routes(tmp_path)
+
+    assert result.routes == []
+    assert len(result.skipped) == 1
+
+    skipped = result.skipped[0]
+    assert skipped.reason == "syntax_error"
+    assert skipped.file == "broken.py"
+    assert skipped.line == 1
+    assert skipped.snippet == "def broken("
+
+
+def test_invalid_utf8_file_is_reported(tmp_path):
+    (tmp_path / "invalid.py").write_bytes(b"\xff\xfe\x80")
+
+    result = extract_routes(tmp_path)
+
+    assert result.routes == []
+    assert len(result.skipped) == 1
+    issue = result.skipped[0]
+    assert issue.reason == "file_read_error"
+    assert issue.file == "invalid.py"
+    assert issue.line == 0
+    assert issue.snippet == "UnicodeDecodeError"
+
+
+def test_valid_routes_survive_broken_sibling_file(tmp_path):
+    (tmp_path / "main.py").write_text(
+        'from fastapi import FastAPI\n'
+        'app = FastAPI()\n'
+        '@app.get("/health")\n'
+        'def health(): return {"ok": True}\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "broken.py").write_text("def broken(\n", encoding="utf-8")
+
+    result = extract_routes(tmp_path)
+
+    assert [(route.method, route.path, route.file) for route in result.routes] == [
+        ("GET", "/health", "main.py")
+    ]
+    assert len(result.skipped) == 1
+    assert result.skipped[0].reason == "syntax_error"
+    assert result.skipped[0].file == "broken.py"
