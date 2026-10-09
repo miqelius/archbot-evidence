@@ -72,3 +72,17 @@ def test_cli_json_output_matches_expected():
     actual = json.loads(completed.stdout)
     expected = json.loads((FIXTURE.parent / "expected.json").read_text())
     assert actual == {"routes": expected, "skipped": []}
+
+def test_syntax_error_is_reported(tmp_path):
+    (tmp_path / "broken.py").write_text("def broken(\n")
+
+    result = extract_routes(tmp_path)
+
+    assert result.routes == []
+    assert len(result.skipped) == 1
+
+    skipped = result.skipped[0]
+    assert skipped.reason == "syntax_error"
+    assert skipped.file == "broken.py"
+    assert skipped.line == 1
+    assert skipped.snippet == "def broken("
