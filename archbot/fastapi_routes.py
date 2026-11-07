@@ -51,8 +51,8 @@ def _arg(call: ast.Call, index: int, key: str) -> ast.AST | None:
 
 
 def _path(*parts: str) -> str:
-    segments = [p.strip("/") for p in parts if p and p.strip("/")]
-    return "/" + "/".join(segments) if segments else "/"
+    # FastAPI concatenates prefixes and paths; trailing slashes are meaningful.
+    return "".join(parts) or "/"
 
 
 def _methods(deco: str, call: ast.Call) -> tuple[str, ...]:
@@ -76,18 +76,23 @@ def _module_name(root: Path, path: Path) -> str:
     return ".".join(parts)
 
 
-def _collect(root: Path) -> dict[str, _Module]:
+def _collect(root: Path) -> tuple[dict[str, _Module], list[Skipped]]:
     modules = {}
+    skipped = []
     for file in sorted(root.rglob("*.py")):
         if any(p.startswith(".") or p in {"venv", ".venv", "node_modules", "__pycache__"} for p in file.relative_to(root).parts):
             continue
+        if file.is_symlink():
+            skipped.append(Skipped("symlink_source", file.relative_to(root).as_posix(), 0, ""))
+            continue
         try:
-            tree = ast.parse(file.read_text(encoding="utf-8"), filename=str(file))
-        except (UnicodeError, SyntaxError, OSError):
+            tree = ast.parse(file.read_text(encoding="utf-8-sig"), filename=str(file))
+        except (UnicodeError, SyntaxError, OSError) as exc:
+            skipped.append(Skipped("source_parse_error", file.relative_to(root).as_posix(), getattr(exc, "lineno", 0) or 0, ""))
             continue
         name = _module_name(root, file)
         modules[name] = _Module(name, file, tree)
-    return modules
+    return modules, skipped
 
 
 def _resolve(mod: _Module, value: str) -> str:
@@ -120,7 +125,7 @@ def _parse(mod: _Module) -> None:
                 mod.aliases[entry.asname or entry.name.split(".")[0]] = entry.name if entry.asname else entry.name.split(".")[0]
         elif isinstance(stmt, (ast.Assign, ast.AnnAssign)) and isinstance(stmt.value, ast.Call):
             constructor = _member(stmt.value.func)
-            if not constructor or constructor.split(".")[-1] not in {"FastAPI", "APIRouter"}:
+            if not constructor or _resolve(mod, constructor) not in {"fastapi.FastAPI", "fastapi.APIRouter"}:
                 continue
             targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
             for target in targets:
@@ -133,10 +138,15 @@ def _parse(mod: _Module) -> None:
                     # Keep object identity so inclusion can be traced as an unknown subtree.
                     mod.objects[target.id] = "unknown"
                 else:
-                    mod.objects[target.id] = constructor.split(".")[-1]
+                    mod.objects[target.id] = _resolve(mod, constructor).split(".")[-1]
                     mod.prefixes[target.id] = prefix
     # Pass 2: collect inclusion edges and endpoint decorators.
-    for node in ast.walk(mod.tree):
+    # Only unconditional module-level declarations are statically registered.
+    for stmt in mod.tree.body:
+        if isinstance(stmt, (ast.If, ast.For, ast.While, ast.Try, ast.With)):
+            _skip(mod, "conditional_registration", stmt)
+    nodes = [stmt.value if isinstance(stmt, ast.Expr) else stmt for stmt in mod.tree.body]
+    for node in nodes:
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "include_router":
             owner = _member(node.func.value)
             target_node = _arg(node, 0, "router")
@@ -157,6 +167,8 @@ def _parse(mod: _Module) -> None:
                 methods = _methods(deco.func.attr, deco)
                 if owner and route is not None and methods:
                     mod.endpoints.append((owner, route, methods, node.lineno))
+                elif owner and deco.func.attr in {*HTTP, "api_route", "route"}:
+                    _skip(mod, "dynamic_endpoint", deco)
 
 
 def extract_routes(path: Path) -> RoutesResult:
@@ -170,7 +182,7 @@ def extract_routes(path: Path) -> RoutesResult:
     root = Path(path).resolve()
     if not root.is_dir():
         raise ValueError(f"Not a directory: {root}")
-    modules = _collect(root)
+    modules, collection_skipped = _collect(root)
     for mod in modules.values():
         _parse(mod)
 
@@ -184,7 +196,7 @@ def extract_routes(path: Path) -> RoutesResult:
             endpoints.setdefault(_resolve(mod, owner), []).append((mod, route, methods, line))
 
     result: set[Route] = set()
-    skipped = [Skipped(item.reason, Path(item.file).relative_to(root).as_posix(), item.line, item.snippet)
+    skipped = collection_skipped + [Skipped(item.reason, Path(item.file).relative_to(root).as_posix(), item.line, item.snippet)
                for mod in modules.values() for item in mod.skipped]
 
     def visit(obj: str, chain: tuple[str, ...], seen: frozenset[str]) -> None:
