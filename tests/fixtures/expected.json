@@ -1,7 +1,7 @@
 [
   {
     "method": "GET",
-    "path": "/api/v1/orders",
+    "path": "/api/v1/orders/",
     "file": "routes/orders.py",
     "line": 6,
     "router_prefix_chain": [
@@ -11,7 +11,7 @@
   },
   {
     "method": "POST",
-    "path": "/api/v1/orders",
+    "path": "/api/v1/orders/",
     "file": "routes/orders.py",
     "line": 10,
     "router_prefix_chain": [

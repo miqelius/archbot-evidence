@@ -11,7 +11,10 @@ def main() -> None:
     parser.add_argument("backend", type=Path, help="FastAPI source root")
     parser.add_argument("--format", choices=("text", "json"), default="text")
     args = parser.parse_args()
-    result = extract_routes(args.backend)
+    try:
+        result = extract_routes(args.backend)
+    except (ValueError, OSError) as exc:
+        parser.error(str(exc))
     routes = result.routes
     if args.format == "json":
         print(json.dumps(asdict(result), ensure_ascii=False, indent=2))

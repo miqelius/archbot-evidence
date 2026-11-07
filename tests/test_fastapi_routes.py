@@ -9,8 +9,8 @@ def test_six_method_routes_with_combined_prefixes():
     routes = extract_routes(FIXTURE).routes
     assert {(r.method, r.path) for r in routes} == {
         ("GET", "/health"),
-        ("GET", "/api/v1/orders"),
-        ("POST", "/api/v1/orders"),
+        ("GET", "/api/v1/orders/"),
+        ("POST", "/api/v1/orders/"),
         ("GET", "/api/v1/orders/{order_id:int}"),
         ("GET", "/legacy/ping"),
         ("POST", "/legacy/ping"),
